@@ -35,8 +35,13 @@ _G = {}  # read-only data shared with forked workers
 def _pmap(fn, tasks):
     if PROCS <= 1 or len(tasks) <= 1:
         return [fn(t) for t in tasks]
-    with get_context("fork").Pool(PROCS) as pool:
-        return pool.map(fn, tasks)
+    if hasattr(os, "fork"):
+        with get_context("fork").Pool(PROCS) as pool:
+            return pool.map(fn, tasks)
+    else:
+        from multiprocessing.dummy import Pool as ThreadPool
+        with ThreadPool(PROCS) as pool:
+            return pool.map(fn, tasks)
 
 
 def _spans(n, parts):

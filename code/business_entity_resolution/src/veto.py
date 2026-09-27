@@ -61,9 +61,13 @@ def flag(pairs, s1, q):
     _G["v"] = (ia, ib, sp(s1["ntok"].to_list()), sp(q["ntok"].to_list()), sp(s1["anum"].to_list()), sp(q["anum"].to_list()))
     n = len(ia)
     step = max(20000, n // (effective_cpus() * 4) + 1)
-    spans = [(i, min(n, i + step)) for i in range(0, n, step)]
-    with get_context("fork").Pool(effective_cpus()) as pool:
-        parts = pool.map(_chunk, spans)
+    if hasattr(os, "fork"):
+        with get_context("fork").Pool(effective_cpus()) as pool:
+            parts = pool.map(_chunk, spans)
+    else:
+        from multiprocessing.dummy import Pool as ThreadPool
+        with ThreadPool(effective_cpus()) as pool:
+            parts = pool.map(_chunk, spans)
     return np.concatenate(parts) if parts else np.zeros(0, bool)
 
 

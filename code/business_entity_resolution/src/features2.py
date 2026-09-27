@@ -52,8 +52,13 @@ _G = {}
 def _pmap(fn, n, parts):
     step = max(20000, n // parts + 1)
     spans = [(i, min(n, i + step)) for i in range(0, n, step)]
-    with get_context("fork").Pool(effective_cpus()) as pool:
-        return pool.map(fn, spans)
+    if hasattr(os, "fork"):
+        with get_context("fork").Pool(effective_cpus()) as pool:
+            return pool.map(fn, spans)
+    else:
+        from multiprocessing.dummy import Pool as ThreadPool
+        with ThreadPool(effective_cpus()) as pool:
+            return pool.map(fn, spans)
 
 
 def _extra(a_toks, b_toks, thr=75):
