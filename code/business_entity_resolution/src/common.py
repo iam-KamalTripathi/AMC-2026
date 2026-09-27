@@ -68,10 +68,16 @@ class Paths:
         os.makedirs(work_dir, exist_ok=True)
 
     def src(self, split, k):
-        return os.path.join(self.data, split, f"{split}_source{k}.tsv")
+        p = os.path.join(self.data, split, f"{split}_source{k}.tsv")
+        if os.path.exists(p):
+            return p
+        return os.path.join(self.data, f"{split}_source{k}.tsv")
 
     def gt(self):
-        return os.path.join(self.data, "train", "train_ground_truth.tsv")
+        p = os.path.join(self.data, "train", "train_ground_truth.tsv")
+        if os.path.exists(p):
+            return p
+        return os.path.join(self.data, "train_ground_truth.tsv")
 
     def w(self, *parts):
         p = os.path.join(self.work, *parts)

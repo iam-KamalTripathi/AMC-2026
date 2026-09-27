@@ -126,6 +126,7 @@ def train(P, args):
     opt = torch.optim.AdamW([{"params": model.parameters()}, {"params": [none_logit], "lr": 1e-3}],
                             lr=args.lr, weight_decay=0.01)
     total = len(batches) * args.epochs
+    scaler = torch.cuda.amp.GradScaler(enabled=dev == "cuda")
     sched = get_linear_schedule_with_warmup(opt, int(0.05 * total), total)
     model.train()
     step = 0
@@ -135,13 +136,15 @@ def train(P, args):
                         prefetch_factor=4 if args.num_workers else None)
         for e, gid, lbl in dl:
             gid, lbl = gid.to(dev), lbl.to(dev)
-            with torch.autocast(dev, dtype=torch.bfloat16, enabled=dev == "cuda"):
+            with torch.autocast(dev, dtype=torch.float16, enabled=dev == "cuda"):
                 logits = model(e["input_ids"].to(dev), e["attention_mask"].to(dev))
             loss = listwise_loss(logits.float(), gid, lbl, none_logit)
             opt.zero_grad(set_to_none=True)
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            opt.step()
+            scaler.step(opt)
+            scaler.update()
             sched.step()
             step += 1
             if step % 200 == 0 or step == 1:
@@ -179,7 +182,10 @@ def score(P, args):
     model.head.load_state_dict(torch.load(os.path.join(path, "head.pt"), map_location="cpu")["head"])
     model = model.to(dev).eval()
     if dev == "cuda":
-        model.m = model.m.to(torch.bfloat16)  # encoder in bf16, head stays fp32
+        model.m = model.m.to(torch.float16)  # encoder in fp16, head stays fp32
+        if torch.cuda.device_count() > 1:
+            log.info(f"Using {torch.cuda.device_count()} GPUs with DataParallel for cross-encoder scoring")
+            model = torch.nn.DataParallel(model)
     for split in args.splits.split(","):
         out_p = P.w(f"xenc{args.tag}", f"{split}.npy")
         c = pl.read_parquet(P.w("pruned", f"{split}.parquet"), columns=["q_idx", "s1_idx"])
@@ -221,17 +227,18 @@ def main():
                     help="backbone; default = the fine-tuned bi-encoder (domain-adapted e5-small)")
     ap.add_argument("--n-cand", type=int, default=4, help="candidates per query in training")
     ap.add_argument("--max-queries", type=int, default=800_000)
-    ap.add_argument("--bs", type=int, default=512, help="pairs per training batch")
+    ap.add_argument("--bs", type=int, default=128, help="pairs per training batch")
     ap.add_argument("--enc-bs", type=int, default=1024)
     ap.add_argument("--lr", type=float, default=4e-5)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--max-len", type=int, default=128)
-    ap.add_argument("--num-workers", type=int, default=max(2, min(12, effective_cpus() - 3)))
+    ap.add_argument("--num-workers", type=int, default=max(2, min(8, effective_cpus())))
     ap.add_argument("--splits", default="train,test")
     ap.add_argument("--skip-train", action="store_true")
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument("--tag", default="", help="suffix of the model / score folders (second cross-encoder)")
-    ap.add_argument("--used-only", action="store_true", help="train split: score only the pairs the final ranker reads")
+    ap.add_argument("--used-only", action="store_true", default=True, help="train split: score only the pairs the final ranker reads")
+    ap.add_argument("--no-used-only", dest="used_only", action="store_false", help="score all pairs including unused folds")
     args = ap.parse_args()
     P = Paths(args.data_dir, args.work_dir)
     if args.model is None and args.tag:

@@ -121,13 +121,14 @@ def train(P, args):
         steps_total += len(batches_ep[-1])
     sched = get_linear_schedule_with_warmup(opt, int(0.05 * steps_total), steps_total)
     log.info(f"bi-encoder: {tr.height} train pairs, {steps_total} steps, bs={args.bs}")
+    scaler = torch.cuda.amp.GradScaler(enabled=dev == "cuda")
     step = 0
     model.train()
     for ep in range(args.epochs):
         dl = DataLoader(BatchDS(batches_ep[ep], s_txt, q_txt, tok, args.max_len), batch_size=None,
                         shuffle=False, num_workers=args.num_workers, prefetch_factor=4 if args.num_workers else None)
         for qe, se, he, si, hi in dl:
-            with torch.autocast(dev, dtype=torch.bfloat16, enabled=dev == "cuda"):
+            with torch.autocast(dev, dtype=torch.float16, enabled=dev == "cuda"):
                 zq = model(qe["input_ids"].to(dev), qe["attention_mask"].to(dev))
                 zs = model(se["input_ids"].to(dev), se["attention_mask"].to(dev))
                 zh = model(he["input_ids"].to(dev), he["attention_mask"].to(dev))
@@ -146,9 +147,11 @@ def train(P, args):
             logits2 = logits2.masked_fill(same2 & ~torch.eye(len(si), dtype=torch.bool, device=dev), -1e4)
             loss = l1 + F.cross_entropy(logits2, lbl)
             opt.zero_grad(set_to_none=True)
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            opt.step()
+            scaler.step(opt)
+            scaler.update()
             sched.step()
             step += 1
             if step % 200 == 0 or step == 1:
@@ -182,7 +185,10 @@ def embed(P, args):
     tok = AutoTokenizer.from_pretrained(path)
     model = Encoder(path).to(dev).eval()
     if dev == "cuda":
-        model = model.to(torch.bfloat16)
+        model = model.to(torch.float16)
+        if torch.cuda.device_count() > 1:
+            log.info(f"Using {torch.cuda.device_count()} GPUs with DataParallel for bi-encoder embedding")
+            model = torch.nn.DataParallel(model)
     for split in ("train", "test"):
         for nm in ("s1", "q"):
             out_p = P.w("emb", f"{split}_{nm}.npy")
@@ -192,8 +198,9 @@ def embed(P, args):
                 log.info(f"skip existing {out_p}")
                 continue
             order = np.argsort(np.fromiter((len(t) for t in txt), np.int32, len(txt)))
+            hidden_size = getattr(model, "module", model).m.config.hidden_size
             out = np.lib.format.open_memmap(out_p, mode="w+", dtype=np.float16,
-                                            shape=(len(txt), model.m.config.hidden_size))
+                                            shape=(len(txt), hidden_size))
             dl = DataLoader(TextDS(txt, order, tok, args.enc_bs, args.max_len), batch_size=None,
                             num_workers=args.num_workers)
             with timer(f"embed {split}/{nm} ({len(txt)})"):
@@ -211,13 +218,13 @@ def main():
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--bs", type=int, default=768)
     ap.add_argument("--no-grad-ckpt", dest="grad_ckpt", action="store_false")
-    ap.add_argument("--enc-bs", type=int, default=1024)
+    ap.add_argument("--enc-bs", type=int, default=2048)
     ap.add_argument("--lr", type=float, default=5e-5)
     ap.add_argument("--tau", type=float, default=0.05)
     ap.add_argument("--epochs", type=int, default=1)
-    ap.add_argument("--max-pairs", type=int, default=3_000_000)
+    ap.add_argument("--max-pairs", type=int, default=500_000)
     ap.add_argument("--max-len", type=int, default=80)
-    ap.add_argument("--num-workers", type=int, default=max(2, min(12, effective_cpus() - 3)))
+    ap.add_argument("--num-workers", type=int, default=max(2, min(8, effective_cpus())))
     ap.add_argument("--skip-train", action="store_true")
     ap.add_argument("--overwrite", action="store_true")
     args = ap.parse_args()
