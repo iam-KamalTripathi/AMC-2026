@@ -5,6 +5,14 @@ import os
 with open("Amazon_ML_Challenge_BER.ipynb", "r", encoding="utf-8") as f:
     base_nb = json.load(f)
 
+# Update base notebook cell 19 with team name
+base_nb["cells"][19]["source"] = [
+    line.replace("team_name = 'final'", "team_name = 'Terminoter'")
+    for line in base_nb["cells"][19]["source"]
+]
+with open("Amazon_ML_Challenge_BER.ipynb", "w", encoding="utf-8") as f:
+    json.dump(base_nb, f, indent=1, ensure_ascii=False)
+
 # Hyperparameters for 35% speedup & high precision
 HP_SOURCE = """# STEP 5: HYPERPARAMETERS & CONFIGURATION REVIEW
 print('=' * 70)
@@ -128,6 +136,12 @@ for cfg in CONFIGS:
     
     # Cell 17: Stage 10 Decision Threshold
     nb["cells"][17]["source"] = to_lines(STAGE10_SOURCE)
+
+    # Cell 19: Team name in Step 12 packaging
+    nb["cells"][19]["source"] = [
+        line.replace("team_name = 'final'", "team_name = 'Terminoter'")
+        for line in nb["cells"][19]["source"]
+    ]
     
     out_path = cfg["filename"]
     with open(out_path, "w", encoding="utf-8") as f:

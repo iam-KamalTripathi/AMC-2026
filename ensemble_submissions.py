@@ -94,7 +94,8 @@ def main():
     parser.add_argument("--candidates", required=True, help="Path to valid candidate_pairs.tsv")
     parser.add_argument("--code-dir", default="code/business_entity_resolution", help="Path to code folder")
     parser.add_argument("--doc", default="Documentation_template.md", help="Path to Documentation_template.md")
-    parser.add_argument("--out", default="final_submission.zip", help="Output submission zip path")
+    parser.add_argument("--team", default="Terminoter", help="Official team name for submission zip")
+    parser.add_argument("--out-dir", default=".", help="Directory to save final zip")
     parser.add_argument("--min-votes", type=int, default=2, help="Minimum model votes to accept a match")
     args = parser.parse_args()
 
@@ -117,19 +118,20 @@ def main():
         import shutil
         shutil.copy(args.candidates, out_candidates)
 
-    print(f"Packaging verified submission zip: {args.out}...")
+    final_zip_target = os.path.join(args.out_dir, f"{args.team}_submission.zip")
+    print(f"Packaging verified submission zip: {final_zip_target}...")
     build_script = "build_submission_zip.py"
     if not os.path.exists(build_script):
         build_script = os.path.join(os.path.dirname(__file__), "build_submission_zip.py")
 
     cmd = [
         sys.executable, build_script,
-        "--team", "final",
+        "--team", args.team,
         "--matching", out_matching,
         "--candidates", out_candidates,
         "--code-dir", args.code_dir,
         "--doc", args.doc,
-        "--out-dir", os.path.dirname(os.path.abspath(args.out)) or ".",
+        "--out-dir", args.out_dir,
         "--force",
         "--check-subset"
     ]

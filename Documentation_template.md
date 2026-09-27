@@ -1,7 +1,7 @@
 # ML Challenge 2026: Business Entity Resolution Solution
 
-**Team Name:** [Your Team Name]  
-**Team Members:** [List all team members]  
+**Team Name:** Terminoter  
+**Team Members:** Kamal Tripathi, Yahsarth Singh, Yashveer Singh  
 **Submission Date:** 27 September 2026
 
 ---
